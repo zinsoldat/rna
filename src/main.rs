@@ -17,7 +17,10 @@ const IPV4_HEADER_LENGTH: u8 = 5;
 fn main() {
 	let ip_address: net::Ipv4Addr = match net::Ipv4Addr::from_str("127.0.0.1") {
 		Ok(address) => address,
-		Err(err) => panic!(err)  
+		Err(err) => {
+    		println!("{:?}", err);
+    		panic!(err)
+    	}  
 	};
 	ping(ip_address, 1);
 }
@@ -37,14 +40,20 @@ fn ping(address: net::Ipv4Addr, ttl: u8) {
     let protocol = Layer3(IpNextHeaderProtocols::Icmp);
     let (mut sender, mut receiver) = match transport_channel(1024, protocol) {
     	Ok((sender, receiver)) => (sender, receiver),
-    	Err(err) => panic!(err)
+    	Err(err) => {
+    		println!("{:?}", err);
+    		panic!(err)
+    	}
     };
 
     let mut receiver = icmp_packet_iter(& mut receiver);
     sender.send_to(ipv4_packet, net::IpAddr::V4(address));
     let result = match receiver.next() {
     	Ok((result, address)) => result,
-    	Err(err) => panic!(err)
+    	Err(err) => {
+    		println!("{:?}", err);
+    		panic!(err)
+    	}
     };
     println!("({:?})", result);
 }
