@@ -1,19 +1,21 @@
 extern crate pnet;
 
 use std::str::FromStr;
-use std::net::{Ipv4Addr};
+use std::net;
 
+use pnet::packet::Packet;
 use pnet::packet::MutablePacket;
 use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::ipv4::MutableIpv4Packet;
 use pnet::packet::icmp::echo_request::MutableEchoRequestPacket;
 use pnet::packet::icmp::IcmpTypes;
+use pnet::transport::{icmp_packet_iter, transport_channel, TransportChannelType::Layer3};
 use pnet::util;
 
 const IPV4_HEADER_LENGTH: u8 = 5;
 
 fn main() {
-	let ip_address: Ipv4Addr = match Ipv4Addr::from_str("127.0.0.1") {
+	let ip_address: net::Ipv4Addr = match net::Ipv4Addr::from_str("127.0.0.1") {
 		Ok(address) => address,
 		Err(err) => panic!(err)  
 	};
@@ -21,27 +23,30 @@ fn main() {
 }
 
 
-fn ping(address: Ipv4Addr, ttl: u8) {
+fn ping(address: net::Ipv4Addr, ttl: u8) {
 	// create the icmp packet. This is the payload of the ip packet
     const ICMP_BUFFER_SIZE: usize = 8;
     let icmp_buffer = & mut [0u8; ICMP_BUFFER_SIZE];
-    let mut icmp_packet = create_icmp_packet(icmp_buffer);
+    let icmp_packet = create_icmp_packet(icmp_buffer);
 
-    // create the ip packet
+    // create the ip packet with icmp packet as payload
     const IP_BUFFER_SIZE: usize = (IPV4_HEADER_LENGTH * 4) as usize + ICMP_BUFFER_SIZE;
 	let ip_buffer = & mut [0u8; IP_BUFFER_SIZE];
-    let mut ipv4_packet = create_ipv4_packet(ip_buffer, address, ttl);
+    let ipv4_packet = create_ipv4_packet(ip_buffer, address, ttl, icmp_packet.packet());
 
-    ipv4_packet.set_total_length((IP_BUFFER_SIZE) as u16);
-    let icmp_mut_packet = icmp_packet.packet_mut();
-    ipv4_packet.set_payload(icmp_mut_packet);
+    let protocol = Layer3(IpNextHeaderProtocols::Icmp);
+    let (mut sender, mut receiver) = match transport_channel(1024, protocol) {
+    	Ok((sender, receiver)) => (sender, receiver),
+    	Err(err) => panic!(err)
+    };
 
-    println!("{:?}", ipv4_packet);
-    print_buffer(ip_buffer);
-    println!("");
-    println!("############");
-    println!("{:?}", icmp_packet);
-    print_buffer(icmp_buffer);
+    let mut receiver = icmp_packet_iter(& mut receiver);
+    sender.send_to(ipv4_packet, net::IpAddr::V4(address));
+    let result = match receiver.next() {
+    	Ok((result, address)) => result,
+    	Err(err) => panic!(err)
+    };
+    println!("({:?})", result);
 }
 
 fn print_buffer(buffer: &[u8]) {
@@ -68,7 +73,7 @@ fn create_icmp_packet(icmp_buffer: & mut [u8]) -> MutableEchoRequestPacket {
     icmp_packet
 }
 
-fn create_ipv4_packet(ip_buffer: & mut [u8], address: Ipv4Addr, ttl: u8) -> MutableIpv4Packet {
+fn create_ipv4_packet<'a>(ip_buffer: &'a mut [u8], address: net::Ipv4Addr, ttl: u8, payload: &'a[u8]) -> MutableIpv4Packet<'a> {
     //
     // ```text
     // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -96,11 +101,14 @@ fn create_ipv4_packet(ip_buffer: & mut [u8], address: Ipv4Addr, ttl: u8) -> Muta
     //     - bit 1: Don't fragment (DF)
     //     - bit 2: More Fragments (MF)
     // - Fragment Offset - offset of the fragment compared tot the unfragmanted IP datagram
+    let packet_size = ip_buffer.len();
     let mut ipv4_packet = MutableIpv4Packet::new(ip_buffer).unwrap();
     ipv4_packet.set_version(4);
-    ipv4_packet.set_header_length(IPV4_HEADER_LENGTH);    
+    ipv4_packet.set_header_length(IPV4_HEADER_LENGTH);  
+    ipv4_packet.set_total_length(packet_size as u16);  
     ipv4_packet.set_next_level_protocol(IpNextHeaderProtocols::Icmp);
     ipv4_packet.set_ttl(ttl);
     ipv4_packet.set_destination(address);
+    ipv4_packet.set_payload(payload);
     ipv4_packet
 }
