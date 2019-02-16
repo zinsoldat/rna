@@ -1,5 +1,5 @@
 [package]
-name = "net-analyse"
+name = "rna"
 version = "0.1.0"
 authors = ["Rene Schmitt <rene.schmitt01@sap.com>"]
 edition = "2018"
