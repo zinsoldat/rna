@@ -2,6 +2,7 @@ extern crate pnet;
 
 use std::str::FromStr;
 use std::net;
+use std::io;
 
 use pnet::packet::Packet;
 use pnet::packet::MutablePacket;
@@ -15,18 +16,35 @@ use pnet::util;
 const IPV4_HEADER_LENGTH: u8 = 5;
 
 fn main() {
-	let ip_address: net::Ipv4Addr = match net::Ipv4Addr::from_str("127.0.0.1") {
+	let ip_address: net::Ipv4Addr = match net::Ipv4Addr::from_str("8.8.8.8") {
 		Ok(address) => address,
 		Err(err) => {
     		println!("{:?}", err);
     		panic!(err)
     	}  
 	};
-	ping(ip_address, 1);
+	traceroute(ip_address);
 }
 
+fn traceroute(address: net::Ipv4Addr) {
+    let mut ttl = 1u8;
+    loop {
+	    let ping_address = match ping(address, ttl) {
+            Ok(address) => address,
+            Err(err) => {
+                println!("{:?}", err);
+                panic!(err)
+            }
+        };
+        println!("TTL: {} - {:?}", ttl, ping_address.to_string());
+        if ping_address == address {
+            return ();
+        }
+        ttl = ttl + 1;
+    }
+}
 
-fn ping(address: net::Ipv4Addr, ttl: u8) {
+fn ping(address: net::Ipv4Addr, ttl: u8) -> io::Result<net::IpAddr> {
 	// create the icmp packet. This is the payload of the ip packet
     const ICMP_BUFFER_SIZE: usize = 8;
     let icmp_buffer = & mut [0u8; ICMP_BUFFER_SIZE];
@@ -48,20 +66,14 @@ fn ping(address: net::Ipv4Addr, ttl: u8) {
 
     let mut receiver = icmp_packet_iter(& mut receiver);
     sender.send_to(ipv4_packet, net::IpAddr::V4(address));
-    let result = match receiver.next() {
-    	Ok((result, address)) => result,
+    let (result, ping_address ) = match receiver.next() {
+    	Ok((result, address)) => (result, address),
     	Err(err) => {
     		println!("{:?}", err);
     		panic!(err)
     	}
     };
-    println!("({:?})", result);
-}
-
-fn print_buffer(buffer: &[u8]) {
-    for buffer_element in buffer.iter() {
-    	print!(" {:}", buffer_element);
-    }
+    Ok(ping_address)
 }
 
 fn create_icmp_packet(icmp_buffer: & mut [u8]) -> MutableEchoRequestPacket {
@@ -114,7 +126,9 @@ fn create_ipv4_packet<'a>(ip_buffer: &'a mut [u8], address: net::Ipv4Addr, ttl: 
     let mut ipv4_packet = MutableIpv4Packet::new(ip_buffer).unwrap();
     ipv4_packet.set_version(4);
     ipv4_packet.set_header_length(IPV4_HEADER_LENGTH);  
+    // ipv4_packet.set_header_length(5);  
     ipv4_packet.set_total_length(packet_size as u16);  
+    // ipv4_packet.set_total_length(28u16);  
     ipv4_packet.set_next_level_protocol(IpNextHeaderProtocols::Icmp);
     ipv4_packet.set_ttl(ttl);
     ipv4_packet.set_destination(address);
